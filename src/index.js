@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import http from 'http';
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, SlashCommandBuilder } from 'discord.js';
 import { getLangFromEmoji, translate, FLAG_TO_LANG } from './translate.js';
 
 const client = new Client({
@@ -31,26 +31,39 @@ function getHelpLanguagesText() {
     .join('\n');
 }
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   console.log('対応リアクション:', Object.keys(FLAG_TO_LANG).join(' '));
+
+  // スラッシュコマンド /help を登録（/ を押したときの一覧に表示される）
+  const helpCommand = new SlashCommandBuilder()
+    .setName('help')
+    .setDescription('使い方と対応言語・国旗を表示')
+    .toJSON();
+  await client.application.commands.set([helpCommand]);
 });
 
-// help コマンド
+const HELP_TEXT = () => [
+  '**使い方**',
+  '翻訳したいメッセージに、下の国旗のリアクションを付けてください。Botがその言語に翻訳して返信します。',
+  '',
+  '**対応言語と国旗**',
+  getHelpLanguagesText()
+].join('\n');
+
+// スラッシュコマンド /help（/ の一覧に表示される）
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  if (interaction.commandName !== 'help') return;
+  await interaction.reply({ content: HELP_TEXT() });
+});
+
+// 従来のテキストコマンド !help / /help
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   const content = message.content?.trim().toLowerCase();
   if (content !== '!help' && content !== '/help') return;
-
-  const helpText = [
-    '**使い方**',
-    '翻訳したいメッセージに、下の国旗のリアクションを付けてください。Botがその言語に翻訳して返信します。',
-    '',
-    '**対応言語と国旗**',
-    getHelpLanguagesText()
-  ].join('\n');
-
-  await message.reply({ content: helpText });
+  await message.reply({ content: HELP_TEXT() });
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
