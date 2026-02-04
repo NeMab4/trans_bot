@@ -56,6 +56,38 @@ export async function translate(text, targetLang) {
 }
 
 /**
+ * 画像内の文字を読み取り、指定言語に翻訳する（Vision API）
+ * @param {string} imageUrl - 画像の URL（Discord の attachment.url など）
+ * @param {string} targetLang - 言語コード
+ * @returns {Promise<string>} 翻訳結果
+ */
+export async function translateImage(imageUrl, targetLang) {
+  const langName = LANG_NAMES[targetLang] ?? targetLang;
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `あなたは翻訳者です。画像に写っている文字をすべて読み取り、${langName}に自然に翻訳してください。翻訳結果のみを返し、説明や注釈は付けないでください。文字が無い画像の場合は「画像に文字は見つかりませんでした」と${langName}で短く返してください。`
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'この画像の文字を翻訳してください。' },
+          { type: 'image_url', image_url: { url: imageUrl } }
+        ]
+      }
+    ],
+    max_tokens: 1000,
+    temperature: 0.3
+  });
+
+  const result = response.choices[0]?.message?.content?.trim();
+  if (!result) throw new Error('翻訳結果が空です');
+  return result;
+}
+
+/**
  * リアクションの絵文字から言語コードを取得する
  * @param {string} emoji - 絵文字（name または id）
  * @returns {string|null} 言語コード、未対応なら null

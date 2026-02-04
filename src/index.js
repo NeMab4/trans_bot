@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import http from 'http';
 import { Client, GatewayIntentBits, Partials, SlashCommandBuilder } from 'discord.js';
-import { getLangFromEmoji, translate, FLAG_TO_LANG } from './translate.js';
+import { getLangFromEmoji, translate, translateImage, FLAG_TO_LANG } from './translate.js';
 
 const client = new Client({
   intents: [
@@ -60,6 +60,8 @@ client.once('ready', async () => {
 const HELP_TEXT = () => [
   '**使い方**',
   '翻訳したいメッセージに、下の国旗のリアクションを付けてください。Botがその言語に翻訳して返信します。',
+  '・テキストメッセージ → その文を翻訳',
+  '・画像だけの投稿 → 画像内の文字を読み取って翻訳',
   '※この案内メッセージに国旗を付けると、この案内をその言語で表示できます。',
   '',
   '**対応言語と国旗**',
@@ -111,20 +113,29 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (!text && message.author?.bot && message.author.id === client.user.id) {
       text = helpMessageCache.get(message.id) ?? '';
     }
-    if (!text) {
+
+    // 画像添付の場合は画像内テキストを翻訳（ユーザー投稿のみ）
+    const imageAttachment = message.attachments?.find((a) =>
+      a.contentType?.startsWith('image/')
+    );
+    const imageUrl = imageAttachment?.url;
+
+    if (!text && !imageUrl) {
       await message.reply({ content: '翻訳できるテキストがありません。', ephemeral: false });
       return;
     }
 
-    // Bot の投稿は help メッセージだけ翻訳する（他 Bot は翻訳しない）
+    // Bot の投稿は help メッセージだけ翻訳する（他 Bot は翻訳しない）。画像はユーザー投稿のみ対象。
     if (message.author?.bot) {
-      if (message.author.id !== client.user.id) return; // 他 Bot のメッセージは無視
-      const isHelp = isHelpMessage(text) || helpMessageCache.has(message.id);
-      if (!isHelp) return; // 自 Bot の help 以外は無視
+      if (message.author.id !== client.user.id) return;
+      const isHelp = text && (isHelpMessage(text) || helpMessageCache.has(message.id));
+      if (!isHelp) return; // 自 Bot の help 以外は無視（Bot の画像は翻訳しない）
     }
 
-    console.log('[Reaction] 翻訳開始:', targetLang);
-    const translated = await translate(text, targetLang);
+    console.log('[Reaction] 翻訳開始:', targetLang, imageUrl ? '(画像)' : '');
+    const translated = text
+      ? await translate(text, targetLang)
+      : await translateImage(imageUrl, targetLang);
     const langLabel = LANG_LABELS[targetLang];
     await message.reply({
       content: `**${reaction.emoji.name} ${langLabel}訳:**\n${translated}`
