@@ -10,7 +10,10 @@ export const FLAG_TO_LANG = {
   '🇰🇷': 'ko',   // 韓国語
   '🇹🇼': 'zh-TW', // 中国語（台湾・繁体字）
   '🇮🇩': 'id',   // インドネシア語
-  '🇻🇳': 'vi'    // ベトナム語
+  '🇻🇳': 'vi',   // ベトナム語
+  '🇸🇦': 'ar',   // アラビア語（現代標準アラビア語・フスハー）
+  '🇪🇬': 'ar',   // アラビア語（エジプトなどでも同じフスハーで翻訳）
+  '🇦🇪': 'ar'    // アラビア語（UAEなど）
 };
 
 const LANG_NAMES = {
@@ -19,13 +22,14 @@ const LANG_NAMES = {
   'ko': '韓国語',
   'zh-TW': '中国語（台湾）',
   'id': 'インドネシア語',
-  'vi': 'ベトナム語'
+  'vi': 'ベトナム語',
+  'ar': 'アラビア語（現代標準アラビア語）'
 };
 
 /**
  * テキストを指定言語に翻訳する（ChatGPT API）
  * @param {string} text - 翻訳するテキスト
- * @param {string} targetLang - 言語コード (ja, en, ko, zh-TW, id, vi)
+ * @param {string} targetLang - 言語コード (ja, en, ko, zh-TW, id, vi, ar)
  * @returns {Promise<string>} 翻訳結果
  */
 export async function translate(text, targetLang) {

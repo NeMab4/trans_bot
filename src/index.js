@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import http from 'http';
 import { Client, GatewayIntentBits, Partials } from 'discord.js';
 import { getLangFromEmoji, translate, FLAG_TO_LANG } from './translate.js';
 
@@ -16,7 +17,7 @@ const client = new Client({
 /** 処理中メッセージID（二重送信防止） */
 const processing = new Set();
 
-const LANG_LABELS = { ja: '日本語', en: '英語', ko: '韓国語', 'zh-TW': '中国語（台湾）', id: 'インドネシア語', vi: 'ベトナム語' };
+const LANG_LABELS = { ja: '日本語', en: '英語', ko: '韓国語', 'zh-TW': '中国語（台湾）', id: 'インドネシア語', vi: 'ベトナム語', ar: 'アラビア語' };
 
 /** help 用の「対応言語と国旗」テキストを生成 */
 function getHelpLanguagesText() {
@@ -109,3 +110,15 @@ client.login(token).catch((err) => {
   console.error('Login failed:', err);
   process.exit(1);
 });
+
+// Render 用: PORT が設定されていれば HTTP サーバーを立てる（GAS の定期 ping でスリープ解除）
+const port = process.env.PORT;
+if (port) {
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+  });
+  server.listen(Number(port), () => {
+    console.log(`Wake endpoint: http://0.0.0.0:${port}`);
+  });
+}

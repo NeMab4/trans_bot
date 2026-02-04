@@ -12,6 +12,7 @@
 | 🇹🇼         | 中国語（台湾・繁体字） |
 | 🇮🇩         | インドネシア語 |
 | 🇻🇳         | ベトナム語   |
+| 🇸🇦 🇪🇬 🇦🇪 | アラビア語（現代標準アラビア語） |
 
 ## セットアップ
 
@@ -59,10 +60,66 @@ npm run dev
 - **`!help` または `/help`** … 使い方と対応言語・国旗の案内を表示します。
 
 1. チャンネルで誰かがメッセージを投稿
-2. そのメッセージに **🇯🇵 / 🇺🇸 / 🇰🇷 / 🇹🇼 / 🇮🇩 / 🇻🇳** のいずれかのリアクションを付ける
+2. そのメッセージに **🇯🇵 / 🇺🇸 / 🇰🇷 / 🇹🇼 / 🇮🇩 / 🇻🇳 / 🇸🇦 など** のいずれかのリアクションを付ける
 3. Bot がそのメッセージに返信し、選んだ言語に翻訳した文を投稿します
+
+## Render にデプロイ + GAS でスリープ解除（無料運用）
+
+Render の無料プランは約15分アクセスがないとスリープするため、Google Apps Script（GAS）で定期的に HTTP アクセスして起こします。
+
+### Render 側
+
+1. [Render](https://render.com) で **New → Web Service**
+2. GitHub のこのリポジトリ（NeMab4/trans_bot）を連携して選択
+3. 設定例:
+   - **Build Command:** `npm install`
+   - **Start Command:** `npm start`
+   - **Environment:** 環境変数 `DISCORD_TOKEN` と `OPENAI_API_KEY` を追加（Secret で）
+4. デプロイ後、**URL**（例: `https://trans-bot-xxxx.onrender.com`）を控える
+
+Bot は `PORT` が設定されているときだけ HTTP サーバーを立て、ルートにアクセスすると `ok` を返します（GAS の ping 用）。
+
+### GAS で定期 ping
+
+1. [Google Apps Script](https://script.google.com) で「新しいプロジェクト」を作成
+2. リポジトリの **`gas-wake-ping.js`** の中身をコピーしてエディタに貼り付け
+3. `RENDER_WAKE_URL` をあなたの Render の URL に変更（末尾スラッシュなし）
+4. 保存して **実行** → `wakeRender` を選んでテスト
+5. 左メニュー **「トリガー」** → **「トリガーを追加」**
+   - 関数: `wakeRender`
+   - イベント: 時間駆動型 → **分ベースのタイマー** → **15分おき**
+6. 保存すると「権限の確認」が出るので、許可する
+
+これで約15分ごとに Render にアクセスし、スリープしにくくできます。
 
 ## 注意
 
 - OpenAI API の利用料が発生します（gpt-4o-mini を使用）
 - `.env` は Git にコミットしないでください（`.gitignore` 済み）
+
+## Git（NeMab4 で push する場合）
+
+このリポジトリは `git@github.com:NeMab4/trans_bot.git` を origin に設定しています。  
+会社アカウント（imaiSMI）がデフォルトのため、NeMab4 で push するには **NeMab4 の GitHub に登録した SSH 鍵** を別途用意し、このリポジトリだけその鍵を使うようにします。
+
+1. **NeMab4 用の鍵を用意**（まだなければ作成して GitHub に登録）
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_nemab4 -C "NeMab4用"
+   ```
+   GitHub → NeMab4 アカウント → Settings → SSH and GPG keys で `id_ed25519_nemab4.pub` を登録。
+
+2. **`~/.ssh/config` に NeMab4 用の Host を追加**
+   ```
+   Host github.com-nemab4
+     HostName github.com
+     User git
+     AddKeysToAgent yes
+     UseKeychain yes
+     IdentityFile ~/.ssh/id_ed25519_nemab4
+   ```
+
+3. **このリポジトリの origin だけ NeMab4 用ホストに変更**
+   ```bash
+   git remote set-url origin git@github.com-nemab4:NeMab4/trans_bot.git
+   git push -u origin main
+   ```
