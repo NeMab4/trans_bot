@@ -62,29 +62,66 @@ export async function translate(text, targetLang) {
  * @returns {Promise<string>} 翻訳結果
  */
 export async function translateImage(imageUrl, targetLang) {
-  const langName = LANG_NAMES[targetLang] ?? targetLang;
+  const extracted = await extractTextFromImageBestEffort(imageUrl);
+  if (!extracted) {
+    const langName = LANG_NAMES[targetLang] ?? targetLang;
+    return await translate('画像に文字は見つかりませんでした。', targetLang).catch(() => `画像に文字は見つかりませんでした（${langName}）`);
+  }
+  return await translate(extracted, targetLang);
+}
+
+function normalizeOcrText(s) {
+  const t = (s ?? '').trim();
+  if (!t) return '';
+  // よくある「文字がない」系の返答を弾く（モデルに言わせない前提だが保険）
+  const lower = t.toLowerCase();
+  if (lower.includes('no text') || lower.includes('no visible text') || t.includes('見つかりません') || t.includes('ありません')) {
+    // ただし短文全てを潰すと誤検知するので、極端に短い場合のみ空扱いにする
+    if (t.length < 40) return '';
+  }
+  return t;
+}
+
+async function extractTextFromImageOnce(imageUrl, model, prompt) {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model,
     messages: [
       {
         role: 'system',
-        content: `あなたは翻訳者です。画像に写っている文字をすべて読み取り、${langName}に自然に翻訳してください。翻訳結果のみを返し、説明や注釈は付けないでください。文字が無い画像の場合は「画像に文字は見つかりませんでした」と${langName}で短く返してください。`
+        content:
+          'あなたはOCRエンジンです。画像に写っている文字を、可能な限り漏らさず正確に抽出してください。' +
+          '出力は「抽出した文字だけ」。説明、注釈、前置き、箇条書きタイトル、囲み、翻訳は一切しないこと。'
       },
       {
         role: 'user',
         content: [
-          { type: 'text', text: 'この画像の文字を翻訳してください。' },
-          { type: 'image_url', image_url: { url: imageUrl } }
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } }
         ]
       }
     ],
-    max_tokens: 1000,
-    temperature: 0.3
+    // OCRは創造性不要
+    temperature: 0,
+    max_tokens: 1200
   });
 
-  const result = response.choices[0]?.message?.content?.trim();
-  if (!result) throw new Error('翻訳結果が空です');
-  return result;
+  return normalizeOcrText(response.choices[0]?.message?.content);
+}
+
+async function extractTextFromImageBestEffort(imageUrl) {
+  // 1回目: 速いモデル + 高詳細
+  const p1 =
+    '画像内の文字をそのまま抽出してください。改行や空白の意味がある場合はできるだけ維持。' +
+    '見出し・本文・UIラベル・チャット文・小さい文字も含めて、読める範囲で全部。';
+  const first = await extractTextFromImageOnce(imageUrl, 'gpt-4o-mini', p1);
+  if (first) return first;
+
+  // 2回目: より強いモデルで「小さい文字/薄い文字/斜め」まで粘る
+  const p2 =
+    '画像内の文字を可能な限り抽出してください。小さい文字、薄い文字、斜めの文字、背景に埋もれた文字も拡大して読むつもりで抽出。' +
+    '一部しか読めなくても、読めた文字は必ず出力してください。';
+  const second = await extractTextFromImageOnce(imageUrl, 'gpt-4o', p2);
+  return second;
 }
 
 /**
