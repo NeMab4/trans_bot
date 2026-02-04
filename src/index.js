@@ -99,14 +99,18 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.commandName === 'event') {
+      // 先に defer して Discord 側の3秒タイムアウトを回避
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.deferReply({ ephemeral: true });
+      }
+
       const rawDatetime = interaction.options.getString('datetime', true);
       const title = interaction.options.getString('title', true);
 
       const m = rawDatetime.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
       if (!m) {
-        await interaction.reply({
+        await interaction.editReply({
           content: '日時の形式は `MM/DD HH:mm`（例: `03/05 20:00`）で入力してください。（サーバータイム基準）',
-          ephemeral: true
         });
         return;
       }
@@ -127,9 +131,8 @@ client.on('interactionCreate', async (interaction) => {
         minute < 0 ||
         minute > 59
       ) {
-        await interaction.reply({
+        await interaction.editReply({
           content: '日時が不正です。`MM/DD HH:mm` の範囲を確認してください。',
-          ephemeral: true
         });
         return;
       }
@@ -153,9 +156,8 @@ client.on('interactionCreate', async (interaction) => {
 
       const maxDelay = 24 * 60 * 60 * 1000 * 25; // 約25日（setTimeout の安全域）
       if (delayMs > maxDelay) {
-        await interaction.reply({
+        await interaction.editReply({
           content: 'あまりにも先のイベントは登録できません。（約25日以内にお願いします）',
-          ephemeral: true
         });
         return;
       }
@@ -171,13 +173,12 @@ client.on('interactionCreate', async (interaction) => {
         jstEvent.getUTCMinutes()
       ).padStart(2, '0')}`;
 
-      await interaction.reply({
+      await interaction.editReply({
         content:
           `イベントリマインドを登録しました。\n` +
           `サーバータイム **${serverStr}**（JST **${jstStr}**）の**5分前**に ` +
           `このチャンネルで @everyone に通知します。\n` +
-          `タイトル: ${title}`,
-        ephemeral: true
+          `タイトル: ${title}`
       });
 
       const channel = interaction.channel;
