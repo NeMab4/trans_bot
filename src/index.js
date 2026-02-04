@@ -158,18 +158,16 @@ client.on('interactionCreate', async (interaction) => {
       const SERVER_TO_UTC_HOURS = 2;
       const eventUtcMs = Date.UTC(year, month - 1, day, hourServer + SERVER_TO_UTC_HOURS, minute);
 
-      // 5分前に通知
-      const remindUtcMs = eventUtcMs - 5 * 60 * 1000;
       const nowMs = Date.now();
-      let delayMs = remindUtcMs - nowMs;
+      const remindUtcMs = eventUtcMs - 5 * 60 * 1000;
+      let delayBeforeMs = remindUtcMs - nowMs;
+      if (delayBeforeMs <= 0) delayBeforeMs = 0;
 
-      if (delayMs <= 0) {
-        // 過去 or 5分以内なら即時通知扱い
-        delayMs = 0;
-      }
+      let delayStartMs = eventUtcMs - nowMs;
+      if (delayStartMs <= 0) delayStartMs = 0;
 
       const maxDelay = 24 * 60 * 60 * 1000 * 25; // 約25日（setTimeout の安全域）
-      if (delayMs > maxDelay) {
+      if (delayBeforeMs > maxDelay || delayStartMs > maxDelay) {
         await interaction.editReply({
           content: 'あまりにも先のイベントは登録できません。（約25日以内にお願いします）',
         });
@@ -199,26 +197,53 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       const channel = interaction.channel;
-      const guildName = interaction.guild?.name ?? 'unknown guild';
+      const timeouts = [];
+      const hasStartReminder = delayStartMs > 0;
 
-      const timeout = setTimeout(async () => {
-        try {
-          eventReminders.delete(reminderId);
-          if (!channel?.isTextBased()) return;
-          await channel.send({
-            content:
-              `@everyone\n` +
-              `【Event Reminder】\n` +
-              `Title: ${title}\n` +
-              `Server time ${serverStr} (JST ${jstStr}) — 5 minutes left.`
-          });
-        } catch (e) {
-          console.error('Failed to send event reminder:', e);
-        }
-      }, delayMs);
+      if (delayBeforeMs >= 0) {
+        const tBefore = setTimeout(async () => {
+          try {
+            if (!channel?.isTextBased()) return;
+            await channel.send({
+              content:
+                `@everyone\n` +
+                `【Event Reminder】\n` +
+                `Title: ${title}\n` +
+                `Server time ${serverStr} (JST ${jstStr}) — 5 minutes left.`
+            });
+          } catch (e) {
+            console.error('Failed to send event reminder (5min):', e);
+          } finally {
+            if (!hasStartReminder) {
+              eventReminders.delete(reminderId);
+            }
+          }
+        }, delayBeforeMs);
+        timeouts.push(tBefore);
+      }
+
+      if (delayStartMs > 0) {
+        const tStart = setTimeout(async () => {
+          try {
+            if (!channel?.isTextBased()) return;
+            await channel.send({
+              content:
+                `@everyone\n` +
+                `【Event Reminder】\n` +
+                `Title: ${title}\n` +
+                `Server time ${serverStr} (JST ${jstStr}) — starts now.`
+            });
+          } catch (e) {
+            console.error('Failed to send event reminder (start):', e);
+          } finally {
+            eventReminders.delete(reminderId);
+          }
+        }, delayStartMs);
+        timeouts.push(tStart);
+      }
 
       eventReminders.set(reminderId, {
-        timeout,
+        timeouts,
         channelId: channel?.id,
         guildId: interaction.guildId,
         title,
@@ -243,7 +268,9 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      clearTimeout(entry.timeout);
+      if (entry.timeouts?.length) {
+        for (const t of entry.timeouts) clearTimeout(t);
+      }
       eventReminders.delete(id);
 
       await interaction.reply({
