@@ -31,6 +31,12 @@ function getHelpLanguagesText() {
     .join('\n');
 }
 
+/** Bot の help メッセージかどうか（本文で判定し、help だけ翻訳対象にする） */
+function isHelpMessage(content) {
+  const t = (content || '').trim();
+  return t.includes('**使い方**') && t.includes('**対応言語と国旗**');
+}
+
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   console.log('対応リアクション:', Object.keys(FLAG_TO_LANG).join(' '));
@@ -46,6 +52,7 @@ client.once('ready', async () => {
 const HELP_TEXT = () => [
   '**使い方**',
   '翻訳したいメッセージに、下の国旗のリアクションを付けてください。Botがその言語に翻訳して返信します。',
+  '※この案内メッセージに国旗を付けると、この案内をその言語で表示できます。',
   '',
   '**対応言語と国旗**',
   getHelpLanguagesText()
@@ -90,6 +97,12 @@ client.on('messageReactionAdd', async (reaction, user) => {
     if (!text) {
       await message.reply({ content: '翻訳できるテキストがありません。', ephemeral: false });
       return;
+    }
+
+    // Bot の投稿は help メッセージだけ翻訳する（他 Bot は翻訳しない）
+    if (message.author?.bot) {
+      if (message.author.id !== client.user.id) return; // 他 Bot のメッセージは無視
+      if (!isHelpMessage(text)) return; // 自 Bot の help 以外は無視
     }
 
     console.log('[Reaction] 翻訳開始:', targetLang);
