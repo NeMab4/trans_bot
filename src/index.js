@@ -67,22 +67,23 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
-  // Bot自身のリアクションは無視
   if (user.bot) return;
 
   const emojiKey = reaction.emoji.name ?? reaction.emoji.identifier ?? '';
   const targetLang = getLangFromEmoji(emojiKey);
+  console.log('[Reaction] emoji:', JSON.stringify(emojiKey), '→ lang:', targetLang ?? '(未対応)');
   if (!targetLang) return;
 
+  let message;
   try {
-    // 部分キャッシュの場合はメッセージを取得
-    if (reaction.partial) {
-      await reaction.fetch();
-    }
-    const message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
+    if (reaction.partial) await reaction.fetch();
+    message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
     const msgId = message.id;
 
-    if (processing.has(msgId)) return;
+    if (processing.has(msgId)) {
+      console.log('[Reaction] 処理中なのでスキップ:', msgId);
+      return;
+    }
     processing.add(msgId);
 
     const text = message.content?.trim();
@@ -91,21 +92,25 @@ client.on('messageReactionAdd', async (reaction, user) => {
       return;
     }
 
+    console.log('[Reaction] 翻訳開始:', targetLang);
     const translated = await translate(text, targetLang);
     const langLabel = LANG_LABELS[targetLang];
     await message.reply({
       content: `**${reaction.emoji.name} ${langLabel}訳:**\n${translated}`
     });
+    console.log('[Reaction] 翻訳完了');
   } catch (err) {
-    console.error('Translation error:', err);
+    console.error('[Reaction] Error:', err);
     const replyContent = err.message?.includes('API')
       ? '翻訳APIのエラーです。APIキーと残高を確認してください。'
       : `翻訳に失敗しました: ${err.message}`;
-    try {
-      await reaction.message.reply({ content: replyContent }).catch(() => {});
-    } catch (_) {}
+    const targetMessage = message ?? (reaction.message.partial ? await reaction.message.fetch().catch(() => null) : reaction.message);
+    if (targetMessage?.reply) {
+      await targetMessage.reply({ content: replyContent }).catch((e) => console.error('Reply failed:', e));
+    }
   } finally {
-    if (reaction.message?.id) processing.delete(reaction.message.id);
+    if (message?.id) processing.delete(message.id);
+    else if (reaction.message?.id) processing.delete(reaction.message.id);
   }
 });
 
