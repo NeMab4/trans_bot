@@ -208,9 +208,9 @@ client.on('interactionCreate', async (interaction) => {
           await channel.send({
             content:
               `@everyone\n` +
-              `【イベントリマインド】\n` +
-              `タイトル: ${title}\n` +
-              `サーバータイム ${serverStr} 開始予定の5分前です。（JST ${jstStr}）`
+              `【Event Reminder】\n` +
+              `Title: ${title}\n` +
+              `Server time ${serverStr} (JST ${jstStr}) — 5 minutes left.`
           });
         } catch (e) {
           console.error('Failed to send event reminder:', e);
