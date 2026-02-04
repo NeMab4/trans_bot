@@ -1,6 +1,14 @@
 import 'dotenv/config';
 import http from 'http';
-import { Client, GatewayIntentBits, Partials, SlashCommandBuilder } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
+} from 'discord.js';
 import { getLangFromEmoji, translate, translateImage, FLAG_TO_LANG } from './translate.js';
 
 const client = new Client({
@@ -27,6 +35,84 @@ function cacheHelpMessage(messageId, text) {
 
 /** イベントリマインド ID → タイマーなど */
 const eventReminders = new Map();
+
+/** /event 重複時の「追加する？キャンセルする？」確認用一時データ */
+const pendingEventConfirms = new Map();
+const EVENT_CONFIRM_TTL_MS = 10 * 60 * 1000; // 10分で破棄
+
+function scheduleEventReminder({ channel, guildId, title, serverStr, jstStr, eventUtcMs, requestedBy }) {
+  const nowMs = Date.now();
+  const remindUtcMs = eventUtcMs - 5 * 60 * 1000;
+  let delayBeforeMs = remindUtcMs - nowMs;
+  if (delayBeforeMs <= 0) delayBeforeMs = 0;
+
+  let delayStartMs = eventUtcMs - nowMs;
+  if (delayStartMs <= 0) delayStartMs = 0;
+
+  const maxDelay = 24 * 60 * 60 * 1000 * 25; // 約25日（setTimeout の安全域）
+  if (delayBeforeMs > maxDelay || delayStartMs > maxDelay) {
+    throw new Error('too_far_in_future');
+  }
+
+  const reminderId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  const timeouts = [];
+  const hasStartReminder = delayStartMs > 0;
+
+  if (delayBeforeMs >= 0) {
+    const tBefore = setTimeout(async () => {
+      try {
+        if (!channel?.isTextBased()) return;
+        await channel.send({
+          content:
+            `@everyone\n` +
+            `【Event Reminder】\n` +
+            `Title: ${title}\n` +
+            `Server time ${serverStr} (JST ${jstStr}) — 5 minutes left.`
+        });
+      } catch (e) {
+        console.error('Failed to send event reminder (5min):', e);
+      } finally {
+        if (!hasStartReminder) {
+          eventReminders.delete(reminderId);
+        }
+      }
+    }, delayBeforeMs);
+    timeouts.push(tBefore);
+  }
+
+  if (delayStartMs > 0) {
+    const tStart = setTimeout(async () => {
+      try {
+        if (!channel?.isTextBased()) return;
+        await channel.send({
+          content:
+            `@everyone\n` +
+            `【Event Reminder】\n` +
+            `Title: ${title}\n` +
+            `Server time ${serverStr} (JST ${jstStr}) — starts now.`
+        });
+      } catch (e) {
+        console.error('Failed to send event reminder (start):', e);
+      } finally {
+        eventReminders.delete(reminderId);
+      }
+    }, delayStartMs);
+    timeouts.push(tStart);
+  }
+
+  eventReminders.set(reminderId, {
+    timeouts,
+    channelId: channel?.id,
+    guildId,
+    title,
+    serverStr,
+    jstStr,
+    createdBy: requestedBy
+  });
+
+  return reminderId;
+}
 
 const LANG_LABELS = { ja: '日本語', en: '英語', ko: '韓国語', 'zh-TW': '中国語（台湾）', id: 'インドネシア語', vi: 'ベトナム語', ar: 'アラビア語' };
 
@@ -99,20 +185,20 @@ const HELP_TEXT = () => [
   getHelpLanguagesText()
 ].join('\n');
 
-// スラッシュコマンド /help /event
+// スラッシュコマンド /help /event ＋ ボタン
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-
   try {
-    if (interaction.commandName === 'help') {
-      const helpText = HELP_TEXT();
-      await interaction.reply({ content: helpText, ephemeral: true });
-      const replyMsg = await interaction.fetchReply().catch(() => null);
-      if (replyMsg?.id) cacheHelpMessage(replyMsg.id, helpText);
-      return;
-    }
+    // ===== スラッシュコマンド =====
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === 'help') {
+        const helpText = HELP_TEXT();
+        await interaction.reply({ content: helpText, ephemeral: true });
+        const replyMsg = await interaction.fetchReply().catch(() => null);
+        if (replyMsg?.id) cacheHelpMessage(replyMsg.id, helpText);
+        return;
+      }
 
-    if (interaction.commandName === 'event') {
+      if (interaction.commandName === 'event') {
       // 先に defer して Discord 側の3秒タイムアウトを回避
       if (!interaction.deferred && !interaction.replied) {
         await interaction.deferReply({ ephemeral: true });
@@ -158,22 +244,6 @@ client.on('interactionCreate', async (interaction) => {
       const SERVER_TO_UTC_HOURS = 2;
       const eventUtcMs = Date.UTC(year, month - 1, day, hourServer + SERVER_TO_UTC_HOURS, minute);
 
-      const nowMs = Date.now();
-      const remindUtcMs = eventUtcMs - 5 * 60 * 1000;
-      let delayBeforeMs = remindUtcMs - nowMs;
-      if (delayBeforeMs <= 0) delayBeforeMs = 0;
-
-      let delayStartMs = eventUtcMs - nowMs;
-      if (delayStartMs <= 0) delayStartMs = 0;
-
-      const maxDelay = 24 * 60 * 60 * 1000 * 25; // 約25日（setTimeout の安全域）
-      if (delayBeforeMs > maxDelay || delayStartMs > maxDelay) {
-        await interaction.editReply({
-          content: 'あまりにも先のイベントは登録できません。（約25日以内にお願いします）',
-        });
-        return;
-      }
-
       const serverStr = `${mmStr.padStart(2, '0')}/${ddStr.padStart(2, '0')} ${hhStr.padStart(
         2,
         '0'
@@ -185,71 +255,65 @@ client.on('interactionCreate', async (interaction) => {
         jstEvent.getUTCMinutes()
       ).padStart(2, '0')}`;
 
-      const reminderId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // 同じチャンネル＋同じサーバータイムが既にあるかチェック
+      const existing = [...eventReminders.values()].find(
+        (e) => e.channelId === interaction.channelId && e.serverStr === serverStr
+      );
 
-      await interaction.editReply({
-        content:
-          `イベントリマインドを登録しました。\n` +
-          `サーバータイム **${serverStr}**（JST **${jstStr}**）の**5分前**に ` +
-          `このチャンネルで @everyone に通知します。\n` +
-          `タイトル: ${title}\n` +
-          `ID: \`${reminderId}\` （キャンセルは /eventcancel でこのIDを指定）`
-      });
+      if (existing) {
+        const confirmId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        pendingEventConfirms.set(confirmId, {
+          guildId: interaction.guildId,
+          channelId: interaction.channelId,
+          title,
+          serverStr,
+          jstStr,
+          eventUtcMs,
+          createdBy: interaction.user.id
+        });
+        setTimeout(() => pendingEventConfirms.delete(confirmId), EVENT_CONFIRM_TTL_MS);
 
-      const channel = interaction.channel;
-      const timeouts = [];
-      const hasStartReminder = delayStartMs > 0;
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`event-confirm:${confirmId}:add`)
+            .setLabel('Add anyway')
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId(`event-confirm:${confirmId}:cancel`)
+            .setLabel('Cancel')
+            .setStyle(ButtonStyle.Secondary)
+        );
 
-      if (delayBeforeMs >= 0) {
-        const tBefore = setTimeout(async () => {
-          try {
-            if (!channel?.isTextBased()) return;
-            await channel.send({
-              content:
-                `@everyone\n` +
-                `【Event Reminder】\n` +
-                `Title: ${title}\n` +
-                `Server time ${serverStr} (JST ${jstStr}) — 5 minutes left.`
-            });
-          } catch (e) {
-            console.error('Failed to send event reminder (5min):', e);
-          } finally {
-            if (!hasStartReminder) {
-              eventReminders.delete(reminderId);
-            }
-          }
-        }, delayBeforeMs);
-        timeouts.push(tBefore);
+        await interaction.editReply({
+          content:
+            '同じチャンネルで同じ日時のイベントが既に登録されています。\n' +
+            `Existing: "${existing.title}" at ${existing.serverStr}\n\n` +
+            '同じ時間にもう1件追加しますか？',
+          components: [row]
+        });
+
+        return;
       }
 
-      if (delayStartMs > 0) {
-        const tStart = setTimeout(async () => {
-          try {
-            if (!channel?.isTextBased()) return;
-            await channel.send({
-              content:
-                `@everyone\n` +
-                `【Event Reminder】\n` +
-                `Title: ${title}\n` +
-                `Server time ${serverStr} (JST ${jstStr}) — starts now.`
-            });
-          } catch (e) {
-            console.error('Failed to send event reminder (start):', e);
-          } finally {
-            eventReminders.delete(reminderId);
-          }
-        }, delayStartMs);
-        timeouts.push(tStart);
-      }
-
-      eventReminders.set(reminderId, {
-        timeouts,
-        channelId: channel?.id,
+      // 重複がない場合はそのまま登録
+      const reminderId = scheduleEventReminder({
+        channel: interaction.channel,
         guildId: interaction.guildId,
         title,
         serverStr,
         jstStr,
-        createdBy: interaction.user.id
+        eventUtcMs,
+        requestedBy: interaction.user.id
+      });
+
+      await interaction.editReply({
+        content:
+          `イベントリマインドを登録しました。\n` +
+          `サーバータイム **${serverStr}**（JST **${jstStr}**）の**5分前**と開始時刻に ` +
+          `このチャンネルで @everyone に通知します。\n` +
+          `タイトル: ${title}\n` +
+          `ID: \`${reminderId}\` （キャンセルは /eventcancel でこのIDを指定）`,
+        components: []
       });
 
       return;
@@ -282,6 +346,54 @@ client.on('interactionCreate', async (interaction) => {
         ephemeral: true
       });
 
+      return;
+    }
+    }
+
+    // ===== ボタンクリック（/event 重複確認） =====
+    if (interaction.isButton()) {
+      const [prefix, confirmId, action] = interaction.customId.split(':');
+      if (prefix !== 'event-confirm') return;
+
+      const data = pendingEventConfirms.get(confirmId);
+      if (!data) {
+        await interaction.reply({
+          content: 'この確認は期限切れか、すでに処理済みです。',
+          ephemeral: true
+        });
+        return;
+      }
+
+      pendingEventConfirms.delete(confirmId);
+
+      if (action === 'cancel') {
+        await interaction.update({
+          content: 'イベントリマインドの追加をキャンセルしました。',
+          components: []
+        });
+        return;
+      }
+
+      // action === 'add'
+      const channel = interaction.channel;
+      const reminderId = scheduleEventReminder({
+        channel,
+        guildId: data.guildId,
+        title: data.title,
+        serverStr: data.serverStr,
+        jstStr: data.jstStr,
+        eventUtcMs: data.eventUtcMs,
+        requestedBy: interaction.user.id
+      });
+
+      await interaction.update({
+        content:
+          `同じ日時に既存のイベントがありましたが、追加登録しました。\n` +
+          `Server time **${data.serverStr}**（JST **${data.jstStr}**）\n` +
+          `Title: ${data.title}\n` +
+          `ID: \`${reminderId}\``,
+        components: []
+      });
       return;
     }
   } catch (err) {
