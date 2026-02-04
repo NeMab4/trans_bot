@@ -100,6 +100,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
   try {
     if (reaction.partial) await reaction.fetch();
     message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
+    // 画像判定のため、attachments が空ならメッセージを再取得（キャッシュで添付が落ちていることがある）
+    if (message.attachments?.size === 0 && !message.content?.trim()) {
+      const refetched = await message.channel?.messages?.fetch(message.id).catch(() => null);
+      if (refetched?.attachments?.size) message = refetched;
+    }
     const msgId = message.id;
 
     if (processing.has(msgId)) {
@@ -115,10 +120,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 
     // 画像添付の場合は画像内テキストを翻訳（ユーザー投稿のみ）
-    const imageAttachment = message.attachments?.find((a) =>
-      a.contentType?.startsWith('image/')
-    );
-    const imageUrl = imageAttachment?.url;
+    const isImage = (a) =>
+      a.contentType?.startsWith('image/') ||
+      /\.(png|jpe?g|gif|webp)$/i.test(a.name ?? a.filename ?? '');
+    const imageAttachment = message.attachments?.find(isImage);
+    const imageUrl = imageAttachment?.url ?? imageAttachment?.proxyURL;
 
     if (!text && !imageUrl) {
       await message.reply({ content: '翻訳できるテキストがありません。', ephemeral: false });
