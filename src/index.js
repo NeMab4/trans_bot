@@ -17,6 +17,14 @@ const client = new Client({
 /** 処理中メッセージID（二重送信防止） */
 const processing = new Set();
 
+/** help メッセージの ID → 本文（Bot 自身の投稿で content が取れない場合の対策） */
+const helpMessageCache = new Map();
+const HELP_CACHE_TTL_MS = 60 * 60 * 1000; // 1時間で削除
+function cacheHelpMessage(messageId, text) {
+  helpMessageCache.set(messageId, text);
+  setTimeout(() => helpMessageCache.delete(messageId), HELP_CACHE_TTL_MS);
+}
+
 const LANG_LABELS = { ja: '日本語', en: '英語', ko: '韓国語', 'zh-TW': '中国語（台湾）', id: 'インドネシア語', vi: 'ベトナム語', ar: 'アラビア語' };
 
 /** help 用の「対応言語と国旗」テキストを生成 */
@@ -62,7 +70,10 @@ const HELP_TEXT = () => [
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== 'help') return;
-  await interaction.reply({ content: HELP_TEXT() });
+  const helpText = HELP_TEXT();
+  await interaction.reply({ content: helpText });
+  const replyMsg = await interaction.fetchReply().catch(() => null);
+  if (replyMsg?.id) cacheHelpMessage(replyMsg.id, helpText);
 });
 
 // 従来のテキストコマンド !help / /help
@@ -70,7 +81,9 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   const content = message.content?.trim().toLowerCase();
   if (content !== '!help' && content !== '/help') return;
-  await message.reply({ content: HELP_TEXT() });
+  const helpText = HELP_TEXT();
+  const sent = await message.reply({ content: helpText });
+  if (sent?.id) cacheHelpMessage(sent.id, helpText);
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
@@ -93,7 +106,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
     processing.add(msgId);
 
-    const text = message.content?.trim();
+    // 本文取得（Bot 自身の help は API で content が取れないことがあるのでキャッシュを参照）
+    let text = message.content?.trim();
+    if (!text && message.author?.bot && message.author.id === client.user.id) {
+      text = helpMessageCache.get(message.id) ?? '';
+    }
     if (!text) {
       await message.reply({ content: '翻訳できるテキストがありません。', ephemeral: false });
       return;
@@ -102,7 +119,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
     // Bot の投稿は help メッセージだけ翻訳する（他 Bot は翻訳しない）
     if (message.author?.bot) {
       if (message.author.id !== client.user.id) return; // 他 Bot のメッセージは無視
-      if (!isHelpMessage(text)) return; // 自 Bot の help 以外は無視
+      const isHelp = isHelpMessage(text) || helpMessageCache.has(message.id);
+      if (!isHelp) return; // 自 Bot の help 以外は無視
     }
 
     console.log('[Reaction] 翻訳開始:', targetLang);
