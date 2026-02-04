@@ -25,6 +25,9 @@ function cacheHelpMessage(messageId, text) {
   setTimeout(() => helpMessageCache.delete(messageId), HELP_CACHE_TTL_MS);
 }
 
+/** イベントリマインド ID → タイマーなど */
+const eventReminders = new Map();
+
 const LANG_LABELS = { ja: '日本語', en: '英語', ko: '韓国語', 'zh-TW': '中国語（台湾）', id: 'インドネシア語', vi: 'ベトナム語', ar: 'アラビア語' };
 
 /** help 用の「対応言語と国旗」テキストを生成 */
@@ -71,7 +74,18 @@ client.once('ready', async () => {
     )
     .toJSON();
 
-  await client.application.commands.set([helpCommand, eventCommand]);
+  const eventCancelCommand = new SlashCommandBuilder()
+    .setName('eventcancel')
+    .setDescription('登録済みイベントリマインドをキャンセル')
+    .addStringOption((opt) =>
+      opt
+        .setName('id')
+        .setDescription('登録時に表示されたイベントID')
+        .setRequired(true)
+    )
+    .toJSON();
+
+  await client.application.commands.set([helpCommand, eventCommand, eventCancelCommand]);
 });
 
 const HELP_TEXT = () => [
@@ -173,32 +187,73 @@ client.on('interactionCreate', async (interaction) => {
         jstEvent.getUTCMinutes()
       ).padStart(2, '0')}`;
 
+      const reminderId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
       await interaction.editReply({
         content:
           `イベントリマインドを登録しました。\n` +
           `サーバータイム **${serverStr}**（JST **${jstStr}**）の**5分前**に ` +
           `このチャンネルで @everyone に通知します。\n` +
-          `タイトル: ${title}`
+          `タイトル: ${title}\n` +
+          `ID: \`${reminderId}\` （キャンセルは /eventcancel でこのIDを指定）`
       });
 
       const channel = interaction.channel;
       const guildName = interaction.guild?.name ?? 'unknown guild';
 
-      setTimeout(async () => {
+      const timeout = setTimeout(async () => {
         try {
+          eventReminders.delete(reminderId);
           if (!channel?.isTextBased()) return;
           await channel.send({
             content:
               `@everyone\n` +
               `【イベントリマインド】\n` +
               `タイトル: ${title}\n` +
-              `サーバータイム ${serverStr} 開始予定の5分前です。（JST ${jstStr}）\n` +
-              `（登録者: ${interaction.user.username} / サーバー: ${guildName}）`
+              `サーバータイム ${serverStr} 開始予定の5分前です。（JST ${jstStr}）`
           });
         } catch (e) {
           console.error('Failed to send event reminder:', e);
         }
       }, delayMs);
+
+      eventReminders.set(reminderId, {
+        timeout,
+        channelId: channel?.id,
+        guildId: interaction.guildId,
+        title,
+        serverStr,
+        jstStr,
+        createdBy: interaction.user.id
+      });
+
+      return;
+    }
+
+    if (interaction.commandName === 'eventcancel') {
+      const id = interaction.options.getString('id', true);
+      const entry = eventReminders.get(id);
+      if (!entry) {
+        await interaction.reply({
+          content:
+            'そのIDのイベントリマインドは見つかりませんでした。\n' +
+            'すでに通知済みか、Botの再起動などで消えている可能性があります。',
+          ephemeral: true
+        });
+        return;
+      }
+
+      clearTimeout(entry.timeout);
+      eventReminders.delete(id);
+
+      await interaction.reply({
+        content:
+          'イベントリマインドをキャンセルしました。\n' +
+          `ID: \`${id}\`\n` +
+          `タイトル: ${entry.title}\n` +
+          `サーバータイム: ${entry.serverStr}（JST ${entry.jstStr}）`,
+        ephemeral: true
+      });
 
       return;
     }
