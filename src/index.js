@@ -139,9 +139,16 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 
     console.log('[Reaction] 翻訳開始:', targetLang, imageUrl ? '(画像)' : '');
-    const translated = text
-      ? await translate(text, targetLang)
-      : await translateImage(imageUrl, targetLang);
+    // テキスト＋画像が両方ある場合は両方翻訳してまとめて返す
+    const [translatedText, translatedImage] = await Promise.all([
+      text ? translate(text, targetLang) : Promise.resolve(null),
+      imageUrl ? translateImage(imageUrl, targetLang) : Promise.resolve(null)
+    ]);
+
+    const translated =
+      translatedText && translatedImage
+        ? `text:\n${translatedText}\n\nimage:\n${translatedImage}`
+        : (translatedText ?? translatedImage);
     const langLabel = LANG_LABELS[targetLang];
     await message.reply({
       content: `**${reaction.emoji.name} ${langLabel}訳:**\n${translated}`
