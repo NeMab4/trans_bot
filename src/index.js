@@ -54,7 +54,24 @@ client.once('ready', async () => {
     .setName('help')
     .setDescription('使い方と対応言語・国旗を表示')
     .toJSON();
-  await client.application.commands.set([helpCommand]);
+  const eventCommand = new SlashCommandBuilder()
+    .setName('event')
+    .setDescription('ゲームイベントのリマインドを設定（サーバータイム基準）')
+    .addStringOption((opt) =>
+      opt
+        .setName('datetime')
+        .setDescription('サーバータイム MM/DD HH:mm（例: 03/05 20:00）')
+        .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('title')
+        .setDescription('イベント名・メモ')
+        .setRequired(true)
+    )
+    .toJSON();
+
+  await client.application.commands.set([helpCommand, eventCommand]);
 });
 
 const HELP_TEXT = () => [
@@ -71,11 +88,120 @@ const HELP_TEXT = () => [
 // スラッシュコマンド /help（/ の一覧に表示される）
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== 'help') return;
-  const helpText = HELP_TEXT();
-  await interaction.reply({ content: helpText });
-  const replyMsg = await interaction.fetchReply().catch(() => null);
-  if (replyMsg?.id) cacheHelpMessage(replyMsg.id, helpText);
+  if (interaction.commandName === 'help') {
+    const helpText = HELP_TEXT();
+    await interaction.reply({ content: helpText, ephemeral: true });
+    const replyMsg = await interaction.fetchReply().catch(() => null);
+    if (replyMsg?.id) cacheHelpMessage(replyMsg.id, helpText);
+    return;
+  }
+
+  if (interaction.commandName === 'event') {
+    const rawDatetime = interaction.options.getString('datetime', true);
+    const title = interaction.options.getString('title', true);
+
+    const m = rawDatetime.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+    if (!m) {
+      await interaction.reply({
+        content: '日時の形式は `MM/DD HH:mm`（例: `03/05 20:00`）で入力してください。（サーバータイム基準）',
+        ephemeral: true
+      });
+      return;
+    }
+
+    const [, mmStr, ddStr, hhStr, minStr] = m;
+    const month = Number(mmStr);
+    const day = Number(ddStr);
+    const hourServer = Number(hhStr);
+    const minute = Number(minStr);
+
+    if (
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31 ||
+      hourServer < 0 ||
+      hourServer > 23 ||
+      minute < 0 ||
+      minute > 59
+    ) {
+      await interaction.reply({
+        content: '日時が不正です。`MM/DD HH:mm` の範囲を確認してください。',
+        ephemeral: true
+      });
+      return;
+    }
+
+    const now = new Date();
+    const year = now.getUTCFullYear();
+
+    // サーバータイム 0:00 = 日本時間 11:00 = UTC 2:00 → サーバータイム = UTC-2
+    const SERVER_TO_UTC_HOURS = 2;
+    const eventUtcMs = Date.UTC(year, month - 1, day, hourServer + SERVER_TO_UTC_HOURS, minute);
+
+    // 5分前に通知
+    const remindUtcMs = eventUtcMs - 5 * 60 * 1000;
+    const nowMs = Date.now();
+    let delayMs = remindUtcMs - nowMs;
+
+    if (delayMs <= 0) {
+      // 過去 or 5分以内なら即時通知扱い
+      delayMs = 0;
+    }
+
+    const maxDelay = 24 * 60 * 60 * 1000 * 25; // 約25日（setTimeout の安全域）
+    if (delayMs > maxDelay) {
+      await interaction.reply({
+        content: 'あまりにも先のイベントは登録できません。（約25日以内にお願いします）',
+        ephemeral: true
+      });
+      return;
+    }
+
+    const eventDate = new Date(eventUtcMs);
+    const remindDate = new Date(remindUtcMs);
+
+    const serverStr = `${mmStr.padStart(2, '0')}/${ddStr.padStart(2, '0')} ${hhStr.padStart(
+      2,
+      '0'
+    )}:${minStr}`;
+    const jstEvent = new Date(eventUtcMs + 9 * 60 * 60 * 1000);
+    const jstStr = `${String(jstEvent.getUTCMonth() + 1).padStart(2, '0')}/${String(
+      jstEvent.getUTCDate()
+    ).padStart(2, '0')} ${String(jstEvent.getUTCHours()).padStart(2, '0')}:${String(
+      jstEvent.getUTCMinutes()
+    ).padStart(2, '0')}`;
+
+    await interaction.reply({
+      content:
+        `イベントリマインドを登録しました。\n` +
+        `サーバータイム **${serverStr}**（JST **${jstStr}**）の**5分前**に ` +
+        `このチャンネルで @everyone に通知します。\n` +
+        `タイトル: ${title}`,
+      ephemeral: true
+    });
+
+    const channel = interaction.channel;
+    const guildName = interaction.guild?.name ?? 'unknown guild';
+
+    setTimeout(async () => {
+      try {
+        if (!channel?.isTextBased()) return;
+        await channel.send({
+          content:
+            `@everyone\n` +
+            `【イベントリマインド】\n` +
+            `タイトル: ${title}\n` +
+            `サーバータイム ${serverStr} 開始予定の5分前です。（JST ${jstStr}）\n` +
+            `（登録者: ${interaction.user.username} / サーバー: ${guildName}）`
+        });
+      } catch (e) {
+        console.error('Failed to send event reminder:', e);
+      }
+    }, delayMs);
+
+    return;
+  }
 });
 
 // 従来のテキストコマンド !help / /help
