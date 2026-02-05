@@ -36,6 +36,9 @@ function cacheHelpMessage(messageId, text) {
 /** イベントリマインド ID → タイマーなど */
 const eventReminders = new Map();
 
+/** ログイン待ちタイムアウト（ready で解除） */
+let loginTimeoutId = null;
+
 /** /event 重複時の「追加する？キャンセルする？」確認用一時データ */
 const pendingEventConfirms = new Map();
 const EVENT_CONFIRM_TTL_MS = 10 * 60 * 1000; // 10分で破棄
@@ -136,6 +139,8 @@ function isHelpMessage(content) {
 }
 
 client.once('ready', async () => {
+  if (loginTimeoutId) clearTimeout(loginTimeoutId);
+  loginTimeoutId = null;
   console.log(`Logged in as ${client.user.tag}`);
   console.log('対応リアクション:', Object.keys(FLAG_TO_LANG).join(' '));
 
@@ -557,8 +562,15 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1);
 }
 
+const LOGIN_TIMEOUT_MS = 25 * 1000;
 console.log('Connecting to Discord...');
+loginTimeoutId = setTimeout(() => {
+  console.error('Discord login timeout (25s). Check token and network.');
+  process.exit(1);
+}, LOGIN_TIMEOUT_MS);
 client.login(token).catch((err) => {
+  if (loginTimeoutId) clearTimeout(loginTimeoutId);
+  loginTimeoutId = null;
   console.error('Login failed:', err?.message ?? err);
   process.exit(1);
 });
