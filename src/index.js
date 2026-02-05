@@ -562,13 +562,15 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1);
 }
 
-const LOGIN_TIMEOUT_MS = 45 * 1000;
+const LOGIN_TIMEOUT_MS = 90 * 1000;
 
 function startBot() {
-  // REST チェックは廃止（先に REST を叩くと 429 になり、ゲートウェイまでブロックされることがある）
   console.log('Connecting to Discord gateway...');
   loginTimeoutId = setTimeout(() => {
-    console.error('Discord gateway timeout (45s). WebSocket may be blocked on this host (e.g. Render free tier).');
+    console.error(
+      'Discord gateway timeout (90s). This Render instance\'s IP may be rate-limited by Discord. ' +
+      'Try Railway, Fly.io, or another host.'
+    );
     process.exit(1);
   }, LOGIN_TIMEOUT_MS);
   client.login(token).catch((err) => {
