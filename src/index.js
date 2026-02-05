@@ -139,7 +139,7 @@ client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   console.log('対応リアクション:', Object.keys(FLAG_TO_LANG).join(' '));
 
-  // スラッシュコマンド /help を登録（/ を押したときの一覧に表示される）
+  // スラッシュコマンド登録（失敗しても Bot はオンラインのままにする）
   const helpCommand = new SlashCommandBuilder()
     .setName('help')
     .setDescription('使い方と対応言語・国旗を表示')
@@ -177,8 +177,16 @@ client.once('ready', async () => {
     .setDescription('このチャンネルに登録されたイベント一覧を表示')
     .toJSON();
 
-  await client.application.commands.set([helpCommand, eventCommand, eventCancelCommand, eventListCommand]);
+  try {
+    await client.application.commands.set([helpCommand, eventCommand, eventCancelCommand, eventListCommand]);
+    console.log('Slash commands registered.');
+  } catch (e) {
+    console.error('Slash command registration failed (bot stays online):', e);
+  }
 });
+
+client.on('error', (err) => console.error('[Discord client error]', err));
+client.on('warn', (msg) => console.warn('[Discord warn]', msg));
 
 const HELP_TEXT = () => [
   '**使い方**',
@@ -531,6 +539,12 @@ client.on('messageReactionAdd', async (reaction, user) => {
   }
 });
 
+// 未処理の Promise 拒否でプロセスが黙って落ちないようにログを出す
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unhandledRejection]', reason);
+  if (reason && typeof reason === 'object' && 'stack' in reason) console.error((reason).stack);
+});
+
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
   console.error('.env に DISCORD_TOKEN を設定してください');
@@ -541,6 +555,7 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1);
 }
 
+console.log('Connecting to Discord...');
 client.login(token).catch((err) => {
   console.error('Login failed:', err);
   process.exit(1);
