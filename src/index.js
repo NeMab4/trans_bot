@@ -565,7 +565,7 @@ if (!process.env.OPENAI_API_KEY) {
 const LOGIN_TIMEOUT_MS = 45 * 1000;
 
 async function startBot() {
-  // 先に REST API でトークン・ネット到達を確認（ゲートウェイより早く結果が出る）
+  // オプション: REST でトークン確認（429 の場合はスキップしてゲートウェイへ）
   console.log('Checking Discord API reachability...');
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), 10000);
@@ -575,12 +575,17 @@ async function startBot() {
       signal: controller.signal
     });
     clearTimeout(t);
-    if (!res.ok) {
-      console.error('Discord API check failed:', res.status, await res.text().catch(() => ''));
+    if (res.status === 429) {
+      // Cloudflare/Discord がこのホストをレート制限している場合でも、ゲートウェイは別経路のことがある
+      console.warn('Discord API rate limited (429). Trying gateway anyway...');
+    } else if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error('Discord API check failed:', res.status, body.slice(0, 200));
       process.exit(1);
+    } else {
+      const me = await res.json();
+      console.log('Discord API OK (bot:', me.username, ')');
     }
-    const me = await res.json();
-    console.log('Discord API OK (bot:', me.username, ')');
   } catch (e) {
     clearTimeout(t);
     console.error('Discord API unreachable or invalid token:', e?.message ?? e);
