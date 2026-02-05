@@ -546,6 +546,8 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const token = process.env.DISCORD_TOKEN;
+// デバッグ用（トークンの中身は出さない）
+console.log('DISCORD_TOKEN set:', !!token, '| OPENAI_API_KEY set:', !!process.env.OPENAI_API_KEY);
 if (!token) {
   console.error('.env に DISCORD_TOKEN を設定してください');
   process.exit(1);
@@ -557,7 +559,7 @@ if (!process.env.OPENAI_API_KEY) {
 
 console.log('Connecting to Discord...');
 client.login(token).catch((err) => {
-  console.error('Login failed:', err);
+  console.error('Login failed:', err?.message ?? err);
   process.exit(1);
 });
 
