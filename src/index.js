@@ -562,18 +562,45 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1);
 }
 
-const LOGIN_TIMEOUT_MS = 25 * 1000;
-console.log('Connecting to Discord...');
-loginTimeoutId = setTimeout(() => {
-  console.error('Discord login timeout (25s). Check token and network.');
-  process.exit(1);
-}, LOGIN_TIMEOUT_MS);
-client.login(token).catch((err) => {
-  if (loginTimeoutId) clearTimeout(loginTimeoutId);
-  loginTimeoutId = null;
-  console.error('Login failed:', err?.message ?? err);
-  process.exit(1);
-});
+const LOGIN_TIMEOUT_MS = 45 * 1000;
+
+async function startBot() {
+  // 先に REST API でトークン・ネット到達を確認（ゲートウェイより早く結果が出る）
+  console.log('Checking Discord API reachability...');
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch('https://discord.com/api/v10/users/@me', {
+      headers: { Authorization: `Bot ${token}` },
+      signal: controller.signal
+    });
+    clearTimeout(t);
+    if (!res.ok) {
+      console.error('Discord API check failed:', res.status, await res.text().catch(() => ''));
+      process.exit(1);
+    }
+    const me = await res.json();
+    console.log('Discord API OK (bot:', me.username, ')');
+  } catch (e) {
+    clearTimeout(t);
+    console.error('Discord API unreachable or invalid token:', e?.message ?? e);
+    process.exit(1);
+  }
+
+  console.log('Connecting to Discord gateway...');
+  loginTimeoutId = setTimeout(() => {
+    console.error('Discord gateway timeout (45s). WebSocket may be blocked on this host (e.g. Render free tier).');
+    process.exit(1);
+  }, LOGIN_TIMEOUT_MS);
+  client.login(token).catch((err) => {
+    if (loginTimeoutId) clearTimeout(loginTimeoutId);
+    loginTimeoutId = null;
+    console.error('Login failed:', err?.message ?? err);
+    process.exit(1);
+  });
+}
+
+startBot();
 
 // Render 用: PORT が設定されていれば HTTP サーバーを立てる（GAS の定期 ping でスリープ解除）
 const port = process.env.PORT;
