@@ -108,6 +108,7 @@ function scheduleEventReminder({ channel, guildId, title, serverStr, jstStr, eve
     title,
     serverStr,
     jstStr,
+    eventUtcMs,
     createdBy: requestedBy
   });
 
@@ -171,7 +172,12 @@ client.once('ready', async () => {
     )
     .toJSON();
 
-  await client.application.commands.set([helpCommand, eventCommand, eventCancelCommand]);
+  const eventListCommand = new SlashCommandBuilder()
+    .setName('eventlist')
+    .setDescription('このチャンネルに登録されたイベント一覧を表示')
+    .toJSON();
+
+  await client.application.commands.set([helpCommand, eventCommand, eventCancelCommand, eventListCommand]);
 });
 
 const HELP_TEXT = () => [
@@ -316,6 +322,29 @@ client.on('interactionCreate', async (interaction) => {
         components: []
       });
 
+      return;
+    }
+
+    if (interaction.commandName === 'eventlist') {
+      const channelId = interaction.channelId;
+      const entries = [...eventReminders.entries()]
+        .filter(([, e]) => e.channelId === channelId)
+        .map(([id, e]) => ({ id, ...e }))
+        .sort((a, b) => (a.eventUtcMs ?? 0) - (b.eventUtcMs ?? 0));
+
+      const maxShow = 25;
+      const lines = entries.slice(0, maxShow).map(
+        (e) => `• **${e.title}** — ${e.serverStr} (JST ${e.jstStr})\n  ID: \`${e.id}\``
+      );
+      let body =
+        entries.length === 0
+          ? 'このチャンネルに登録されたイベントはありません。'
+          : `**このチャンネルの登録イベント（${entries.length}件）**\n\n` +
+            lines.join('\n\n') +
+            (entries.length > maxShow ? `\n\n（他 ${entries.length - maxShow} 件）` : '');
+      if (body.length > 1990) body = body.slice(0, 1985) + '…（省略）';
+
+      await interaction.reply({ content: body, ephemeral: true });
       return;
     }
 
