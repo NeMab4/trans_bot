@@ -118,7 +118,16 @@ function scheduleEventReminder({ channel, guildId, title, serverStr, jstStr, eve
   return reminderId;
 }
 
-const LANG_LABELS = { ja: '日本語', en: '英語', ko: '韓国語', 'zh-TW': '中国語（台湾）', id: 'インドネシア語', vi: 'ベトナム語', ar: 'アラビア語' };
+const LANG_LABELS = {
+  ja: '日本語',
+  en: '英語',
+  ko: '韓国語',
+  'zh-TW': '中国語（繁体字）',
+  'zh-CN': '中国語（簡体字）',
+  id: 'インドネシア語',
+  vi: 'ベトナム語',
+  ar: 'アラビア語'
+};
 
 /** help 用の「対応言語と国旗」テキストを生成 */
 function getHelpLanguagesText() {

@@ -9,7 +9,8 @@
 | 🇯🇵         | 日本語   |
 | 🇺🇸 🇬🇧     | 英語     |
 | 🇰🇷         | 韓国語   |
-| 🇹🇼         | 中国語（台湾・繁体字） |
+| 🇹🇼         | 中国語（繁体字） |
+| 🇨🇳         | 中国語（簡体字） |
 | 🇮🇩         | インドネシア語 |
 | 🇻🇳         | ベトナム語   |
 | 🇸🇦 🇪🇬 🇦🇪 | アラビア語（現代標準アラビア語） |
@@ -92,6 +93,20 @@ Bot は `PORT` が設定されているときだけ HTTP サーバーを立て�
 6. 保存すると「権限の確認」が出るので、許可する
 
 これで約15分ごとに Render にアクセスし、スリープしにくくできます。
+
+## Railway にデプロイ（Render で Discord に接続できない場合）
+
+Render のインスタンス IP が Discord にレート制限され、ゲートウェイに接続できない場合があります。そのときは **Railway** にデプロイすると別 IP で動くため、接続できることが多いです。
+
+1. [Railway](https://railway.app) にログイン（GitHub 連携が簡単）
+2. **New Project** → **Deploy from GitHub repo** でこのリポジトリ（`NeMab4/trans_bot`）を選択
+3. デプロイが始まったら **Variables** で環境変数を追加:
+   - `DISCORD_TOKEN` … Bot トークン
+   - `OPENAI_API_KEY` … OpenAI API キー
+4. **Settings** で **Start Command** が `npm start` になっていることを確認（未設定なら自動で `npm start`）
+5. **Deploy** が成功すると Bot がオンラインになります
+
+Railway 無料枠は月の利用量に上限がありますが、スリープは Render ほど厳しくないため、GAS の wake ping は必須ではありません。必要なら **Settings → Networking** で Public URL を有効にし、その URL を GAS で叩くこともできます。
 
 ## 注意
 
