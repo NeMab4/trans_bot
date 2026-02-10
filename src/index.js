@@ -254,14 +254,14 @@ client.once('ready', async () => {
         .setDescription('翻訳先の言語')
         .setRequired(true)
         .addChoices(
-          { name: '日本語', value: 'ja' },
-          { name: '英語', value: 'en' },
-          { name: '韓国語', value: 'ko' },
-          { name: '中国語（繁体字）', value: 'zh-TW' },
-          { name: '中国語（簡体字）', value: 'zh-CN' },
-          { name: 'インドネシア語', value: 'id' },
-          { name: 'ベトナム語', value: 'vi' },
-          { name: 'アラビア語', value: 'ar' }
+          { name: '🇯🇵 Japanese', value: 'ja' },
+          { name: '🇺🇸 English', value: 'en' },
+          { name: '🇰🇷 Korean', value: 'ko' },
+          { name: '🇹🇼 Chinese (Traditional)', value: 'zh-TW' },
+          { name: '🇨🇳 Chinese (Simplified)', value: 'zh-CN' },
+          { name: '🇮🇩 Indonesian', value: 'id' },
+          { name: '🇻🇳 Vietnamese', value: 'vi' },
+          { name: '🇸🇦 Arabic', value: 'ar' }
         )
     )
     .toJSON();
@@ -295,6 +295,11 @@ const HELP_TEXT = () => [
   '・テキストメッセージ → その文を翻訳',
   '・画像だけの投稿 → 画像内の文字を読み取って翻訳',
   '※この案内メッセージに国旗を付けると、この案内をその言語で表示できます。',
+  '',
+  '**自分だけに翻訳を表示したい場合**',
+  '1. `/setlang` コマンドで翻訳先の言語を設定',
+  '2. メッセージを右クリック → Apps → 「Pepper Trans」で翻訳',
+  '→ 設定した言語に翻訳され、あなただけに表示されます',
   '',
   '**対応言語と国旗**',
   getHelpLanguagesText()
