@@ -578,10 +578,18 @@ client.on('messageReactionAdd', async (reaction, user) => {
       translatedText && translatedImage
         ? `text:\n${translatedText}\n\nimage:\n${translatedImage}`
         : (translatedText ?? translatedImage);
+
     const langLabel = LANG_LABELS[targetLang];
-    await message.reply({
-      content: `**${reaction.emoji.name} ${langLabel}訳:**\n${translated}`
-    });
+    const jumpLink =
+      message.guildId && message.channelId && message.id
+        ? `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
+        : null;
+
+    let body = `**${reaction.emoji.name} ${langLabel}訳**`;
+    if (jumpLink) body += `\n[元メッセージ](${jumpLink})`;
+    body += `\n\n\`\`\`\n${translated}\n\`\`\``;
+
+    await message.channel.send({ content: body });
     console.log('[Reaction] 翻訳完了');
   } catch (err) {
     console.error('[Reaction] Error:', err);

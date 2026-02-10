@@ -128,9 +128,12 @@ async function extractTextFromImageBestEffort(imageUrl) {
 
 /**
  * リアクションの絵文字から言語コードを取得する
+ * 一部クライアントは絵文字にバリアントセレクタ(U+FE0F)を付けるので、まずそれを取り除いてから判定する
  * @param {string} emoji - 絵文字（name または id）
  * @returns {string|null} 言語コード、未対応なら null
  */
 export function getLangFromEmoji(emoji) {
-  return FLAG_TO_LANG[emoji] ?? null;
+  const raw = emoji ?? '';
+  const cleaned = raw.replace(/\uFE0F/g, '');
+  return FLAG_TO_LANG[cleaned] ?? FLAG_TO_LANG[raw] ?? null;
 }
