@@ -1,7 +1,5 @@
 import 'dotenv/config';
 import http from 'http';
-import fs from 'fs/promises';
-import path from 'path';
 import {
   Client,
   GatewayIntentBits,
@@ -12,41 +10,43 @@ import {
   ButtonStyle
 } from 'discord.js';
 import { getLangFromEmoji, translate, translateImage, FLAG_TO_LANG } from './translate.js';
+import {
+  loadEventRemindersFromNotion,
+  saveEventReminderToNotion,
+  deleteEventReminderFromNotion,
+  loadUserLangSettingsFromNotion,
+  saveUserLangSettingToNotion
+} from './notion.js';
 
-const REMINDERS_FILE = path.join(process.cwd(), 'data', 'event-reminders.json');
+/** ユーザーID → 言語コード */
+const userLangSettings = new Map();
 
-async function loadEventReminders() {
+async function loadUserLangSettings() {
   try {
-    const raw = await fs.readFile(REMINDERS_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    eventReminders.clear();
-    for (const [id, r] of Object.entries(data)) {
-      if (r && r.channelId && r.eventUtcMs != null) {
-        eventReminders.set(id, {
-          channelId: r.channelId,
-          guildId: r.guildId,
-          title: r.title,
-          serverStr: r.serverStr,
-          jstStr: r.jstStr,
-          eventUtcMs: r.eventUtcMs,
-          createdBy: r.createdBy,
-          sent5min: !!r.sent5min,
-          sentStart: !!r.sentStart
-        });
-      }
+    const settings = await loadUserLangSettingsFromNotion();
+    userLangSettings.clear();
+    for (const [userId, lang] of settings.entries()) {
+      userLangSettings.set(userId, lang);
     }
   } catch (e) {
-    if (e.code !== 'ENOENT') console.error('Failed to load event reminders:', e);
+    console.error('Failed to load user lang settings:', e);
   }
 }
 
-async function saveEventReminders() {
+async function saveUserLangSetting(userId, lang) {
   try {
-    const dir = path.dirname(REMINDERS_FILE);
-    await fs.mkdir(dir, { recursive: true });
-    const data = {};
-    for (const [id, r] of eventReminders.entries()) {
-      data[id] = {
+    await saveUserLangSettingToNotion(userId, lang);
+  } catch (e) {
+    console.error('Failed to save user lang setting:', e);
+  }
+}
+
+async function loadEventReminders() {
+  try {
+    const reminders = await loadEventRemindersFromNotion();
+    eventReminders.clear();
+    for (const [id, r] of reminders.entries()) {
+      eventReminders.set(id, {
         channelId: r.channelId,
         guildId: r.guildId,
         title: r.title,
@@ -56,11 +56,18 @@ async function saveEventReminders() {
         createdBy: r.createdBy,
         sent5min: !!r.sent5min,
         sentStart: !!r.sentStart
-      };
+      });
     }
-    await fs.writeFile(REMINDERS_FILE, JSON.stringify(data, null, 0), 'utf8');
   } catch (e) {
-    console.error('Failed to save event reminders:', e);
+    console.error('Failed to load event reminders:', e);
+  }
+}
+
+async function saveEventReminder(id, reminder) {
+  try {
+    await saveEventReminderToNotion(id, reminder);
+  } catch (e) {
+    console.error('Failed to save event reminder:', e);
   }
 }
 
@@ -105,7 +112,7 @@ function scheduleEventReminder({ channel, guildId, title, serverStr, jstStr, eve
   }
 
   const reminderId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  eventReminders.set(reminderId, {
+  const reminder = {
     channelId: channel?.id,
     guildId,
     title,
@@ -115,8 +122,9 @@ function scheduleEventReminder({ channel, guildId, title, serverStr, jstStr, eve
     createdBy: requestedBy,
     sent5min: false,
     sentStart: false
-  });
-  saveEventReminders();
+  };
+  eventReminders.set(reminderId, reminder);
+  saveEventReminder(reminderId, reminder);
   return reminderId;
 }
 
@@ -156,17 +164,17 @@ client.once('ready', async () => {
   console.log('対応リアクション:', Object.keys(FLAG_TO_LANG).join(' '));
 
   await loadEventReminders();
+  await loadUserLangSettings();
   const POLL_INTERVAL_MS = 60 * 1000;
   setInterval(async () => {
     const nowMs = Date.now();
     const remind5minMs = 5 * 60 * 1000;
-    let changed = false;
     for (const [id, r] of [...eventReminders.entries()]) {
       let channel = client.channels.cache.get(r.channelId);
       if (!channel) channel = await client.channels.fetch(r.channelId).catch(() => null);
       if (!channel?.isTextBased()) {
         eventReminders.delete(id);
-        changed = true;
+        deleteEventReminderFromNotion(id).catch(e => console.error('Delete from Notion failed:', e));
         continue;
       }
       const content5 = `@everyone\n【Event Reminder】\nTitle: ${r.title}\nServer time ${r.serverStr} (JST ${r.jstStr}) — 5 minutes left.`;
@@ -178,7 +186,7 @@ client.once('ready', async () => {
           console.error('Failed to send event reminder (5min):', e);
         }
         r.sent5min = true;
-        changed = true;
+        saveEventReminder(id, r).catch(e => console.error('Save to Notion failed:', e));
       }
       if (nowMs >= r.eventUtcMs && !r.sentStart) {
         try {
@@ -187,17 +195,16 @@ client.once('ready', async () => {
           console.error('Failed to send event reminder (start):', e);
         }
         r.sentStart = true;
-        changed = true;
+        saveEventReminder(id, r).catch(e => console.error('Save to Notion failed:', e));
       }
       if (r.sent5min && r.sentStart) {
         eventReminders.delete(id);
-        changed = true;
+        deleteEventReminderFromNotion(id).catch(e => console.error('Delete from Notion failed:', e));
       } else if (nowMs > r.eventUtcMs + 60 * 1000) {
         eventReminders.delete(id);
-        changed = true;
+        deleteEventReminderFromNotion(id).catch(e => console.error('Delete from Notion failed:', e));
       }
     }
-    if (changed) saveEventReminders();
   }, POLL_INTERVAL_MS);
 
   // スラッシュコマンド登録（失敗しても Bot はオンラインのままにする）
@@ -238,8 +245,41 @@ client.once('ready', async () => {
     .setDescription('このチャンネルに登録されたイベント一覧を表示')
     .toJSON();
 
+  const setLangCommand = new SlashCommandBuilder()
+    .setName('setlang')
+    .setDescription('コンテキストメニュー翻訳の言語を設定')
+    .addStringOption((opt) =>
+      opt
+        .setName('language')
+        .setDescription('翻訳先の言語')
+        .setRequired(true)
+        .addChoices(
+          { name: '日本語', value: 'ja' },
+          { name: '英語', value: 'en' },
+          { name: '韓国語', value: 'ko' },
+          { name: '中国語（繁体字）', value: 'zh-TW' },
+          { name: '中国語（簡体字）', value: 'zh-CN' },
+          { name: 'インドネシア語', value: 'id' },
+          { name: 'ベトナム語', value: 'vi' },
+          { name: 'アラビア語', value: 'ar' }
+        )
+    )
+    .toJSON();
+
+  const pepperTransContext = {
+    name: 'Pepper Trans',
+    type: 3 // MESSAGE
+  };
+
   try {
-    await client.application.commands.set([helpCommand, eventCommand, eventCancelCommand, eventListCommand]);
+    await client.application.commands.set([
+      helpCommand,
+      eventCommand,
+      eventCancelCommand,
+      eventListCommand,
+      setLangCommand,
+      pepperTransContext
+    ]);
     console.log('Slash commands registered.');
   } catch (e) {
     console.error('Slash command registration failed (bot stays online):', e);
@@ -431,7 +471,7 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       eventReminders.delete(id);
-      saveEventReminders();
+      deleteEventReminderFromNotion(id).catch(e => console.error('Delete from Notion failed:', e));
 
       await interaction.reply({
         content:
@@ -444,6 +484,74 @@ client.on('interactionCreate', async (interaction) => {
 
       return;
     }
+
+    if (interaction.commandName === 'setlang') {
+      const lang = interaction.options.getString('language', true);
+      userLangSettings.set(interaction.user.id, lang);
+      saveUserLangSetting(interaction.user.id, lang).catch(e => console.error('Save to Notion failed:', e));
+      const langName = LANG_LABELS[lang] ?? lang;
+      await interaction.reply({
+        content: `翻訳先言語を **${langName}** に設定しました。\nメッセージを右クリック → Apps → 「Pepper Trans」で翻訳できます。`,
+        ephemeral: true
+      });
+      return;
+    }
+    }
+
+    // ===== メッセージコンテキストメニュー =====
+    if (interaction.isMessageContextMenuCommand()) {
+      if (interaction.commandName === 'Pepper Trans') {
+        await interaction.deferReply({ ephemeral: true });
+        const targetLang = userLangSettings.get(interaction.user.id);
+        if (!targetLang) {
+          await interaction.editReply({
+            content: '翻訳先言語が設定されていません。\n`/setlang` コマンドで言語を設定してください。'
+          });
+          return;
+        }
+
+        const message = interaction.targetMessage;
+        let text = message.content?.trim();
+        if (!text && message.author?.bot && message.author.id === client.user.id) {
+          text = helpMessageCache.get(message.id) ?? '';
+        }
+
+        const isImage = (a) =>
+          a.contentType?.startsWith('image/') ||
+          /\.(png|jpe?g|gif|webp)$/i.test(a.name ?? a.filename ?? '');
+        const imageAttachment = message.attachments?.find(isImage);
+        const imageUrl = imageAttachment?.url ?? imageAttachment?.proxyURL;
+
+        if (!text && !imageUrl) {
+          await interaction.editReply({
+            content: '翻訳できるテキストがありません。'
+          });
+          return;
+        }
+
+        const [translatedText, translatedImage] = await Promise.all([
+          text ? translate(text, targetLang) : Promise.resolve(null),
+          imageUrl ? translateImage(imageUrl, targetLang) : Promise.resolve(null)
+        ]);
+
+        const translated =
+          translatedText && translatedImage
+            ? `text:\n${translatedText}\n\nimage:\n${translatedImage}`
+            : (translatedText ?? translatedImage);
+
+        const langName = LANG_LABELS[targetLang] ?? targetLang;
+        const jumpLink =
+          message.guildId && message.channelId && message.id
+            ? `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
+            : null;
+
+        let body = `**Translation to ${langName}**`;
+        if (jumpLink) body += `\n[Original message](${jumpLink})`;
+        body += `\n\n\`\`\`\n${translated}\n\`\`\``;
+
+        await interaction.editReply({ content: body });
+        return;
+      }
     }
 
     // ===== ボタンクリック（/event 重複確認） =====
@@ -579,14 +687,13 @@ client.on('messageReactionAdd', async (reaction, user) => {
         ? `text:\n${translatedText}\n\nimage:\n${translatedImage}`
         : (translatedText ?? translatedImage);
 
-    const langLabel = LANG_LABELS[targetLang];
     const jumpLink =
       message.guildId && message.channelId && message.id
         ? `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
         : null;
 
-    let body = `**${reaction.emoji.name} ${langLabel}訳**`;
-    if (jumpLink) body += `\n[元メッセージ](${jumpLink})`;
+    let body = `**${reaction.emoji.name} Translation**`;
+    if (jumpLink) body += `\n[Original message](${jumpLink})`;
     body += `\n\n\`\`\`\n${translated}\n\`\`\``;
 
     await message.channel.send({ content: body });

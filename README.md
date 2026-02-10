@@ -35,8 +35,51 @@ cp .env.example .env
 |--------|------|
 | `DISCORD_TOKEN` | Discord Developer Portal で発行したBotのトークン |
 | `OPENAI_API_KEY` | OpenAI（ChatGPT）API キー（`sk-...`） |
+| `NOTION_API_KEY` | Notion インテグレーションシークレット（`ntn_...`） |
+| `NOTION_EVENT_DB_ID` | EventReminders データベース ID |
+| `NOTION_USER_LANG_DB_ID` | UserLangSettings データベース ID |
 
-### 3. Discord Bot の作成と設定
+### 3. Notion データベースのセットアップ（イベントリマインダー永続化）
+
+Bot 再起動時にイベントリマインダーとユーザー言語設定が消えないよう、Notion をデータベースとして使います。
+
+#### 3-1. Notion インテグレーションの作成
+
+1. [Notion Integrations](https://www.notion.so/my-integrations) にアクセス
+2. **「New integration」** をクリック
+3. 設定:
+   - **Name:** 任意（例: `Discord Bot`）
+   - **Associated workspace:** 自分のワークスペース
+   - **Type:** `Internal`
+4. **Submit** → 作成されたインテグレーションの **「Secrets」** タブから **Internal Integration Secret** をコピー
+5. `.env` の `NOTION_API_KEY` に貼り付け（`ntn_` で始まる文字列）
+
+#### 3-2. Notion データベースの作成
+
+1. Notion で新しいページを作成（タイトルは任意、例: `Bot Data`）
+2. そのページ内に **2つのデータベース** を作成:
+   - **EventReminders**（イベントリマインダー用）
+   - **UserLangSettings**（ユーザー言語設定用）
+3. 各データベースの右上 **「•••」メニュー** → **「Add connections」** → 作成したインテグレーションを選択
+4. 各データベースの URL からデータベース ID を取得:
+   - URL: `https://notion.so/{32文字の英数字}?v=...`
+   - その 32 文字（ハイフンなし）をコピー
+5. `.env` に設定:
+   - `NOTION_EVENT_DB_ID=` に EventReminders の ID
+   - `NOTION_USER_LANG_DB_ID=` に UserLangSettings の ID
+
+#### 3-3. データベースプロパティの設定
+
+データベースに必要なプロパティを自動で追加するスクリプトを実行します:
+
+```bash
+npm install
+node scripts/setup-notion-db.js
+```
+
+「✅ すべてのデータベースのセットアップが完了しました！」と表示されれば成功です。
+
+### 4. Discord Bot の作成と設定
 
 1. [Discord Developer Portal](https://discord.com/developers/applications) でアプリケーションを作成
 2. **Bot** タブで Bot を追加し、**Reset Token** でトークンを取得 → `DISCORD_TOKEN` に設定
@@ -44,7 +87,7 @@ cp .env.example .env
    - **Message Content Intent**（メッセージ本文を読むために必須）
 4. **OAuth2 → URL Generator** でスコープに `bot`、Bot Permissions で「メッセージの送信」「メッセージ履歴の閲覧」など必要権限を付与し、生成されたURLでサーバーにBotを招待
 
-### 4. 起動
+### 5. 起動
 
 ```bash
 npm start
