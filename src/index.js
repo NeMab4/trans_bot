@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import http from 'http';
+import fs from 'fs/promises';
+import path from 'path';
 import {
   Client,
   GatewayIntentBits,
@@ -10,6 +12,57 @@ import {
   ButtonStyle
 } from 'discord.js';
 import { getLangFromEmoji, translate, translateImage, FLAG_TO_LANG } from './translate.js';
+
+const REMINDERS_FILE = path.join(process.cwd(), 'data', 'event-reminders.json');
+
+async function loadEventReminders() {
+  try {
+    const raw = await fs.readFile(REMINDERS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    eventReminders.clear();
+    for (const [id, r] of Object.entries(data)) {
+      if (r && r.channelId && r.eventUtcMs != null) {
+        eventReminders.set(id, {
+          channelId: r.channelId,
+          guildId: r.guildId,
+          title: r.title,
+          serverStr: r.serverStr,
+          jstStr: r.jstStr,
+          eventUtcMs: r.eventUtcMs,
+          createdBy: r.createdBy,
+          sent5min: !!r.sent5min,
+          sentStart: !!r.sentStart
+        });
+      }
+    }
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('Failed to load event reminders:', e);
+  }
+}
+
+async function saveEventReminders() {
+  try {
+    const dir = path.dirname(REMINDERS_FILE);
+    await fs.mkdir(dir, { recursive: true });
+    const data = {};
+    for (const [id, r] of eventReminders.entries()) {
+      data[id] = {
+        channelId: r.channelId,
+        guildId: r.guildId,
+        title: r.title,
+        serverStr: r.serverStr,
+        jstStr: r.jstStr,
+        eventUtcMs: r.eventUtcMs,
+        createdBy: r.createdBy,
+        sent5min: !!r.sent5min,
+        sentStart: !!r.sentStart
+      };
+    }
+    await fs.writeFile(REMINDERS_FILE, JSON.stringify(data, null, 0), 'utf8');
+  } catch (e) {
+    console.error('Failed to save event reminders:', e);
+  }
+}
 
 const client = new Client({
   intents: [
@@ -46,75 +99,24 @@ const EVENT_CONFIRM_TTL_MS = 10 * 60 * 1000; // 10分で破棄
 function scheduleEventReminder({ channel, guildId, title, serverStr, jstStr, eventUtcMs, requestedBy }) {
   const nowMs = Date.now();
   const remindUtcMs = eventUtcMs - 5 * 60 * 1000;
-  let delayBeforeMs = remindUtcMs - nowMs;
-  if (delayBeforeMs <= 0) delayBeforeMs = 0;
-
-  let delayStartMs = eventUtcMs - nowMs;
-  if (delayStartMs <= 0) delayStartMs = 0;
-
-  const maxDelay = 24 * 60 * 60 * 1000 * 25; // 約25日（setTimeout の安全域）
-  if (delayBeforeMs > maxDelay || delayStartMs > maxDelay) {
+  const maxFutureMs = 24 * 60 * 60 * 1000 * 365; // 約1年まで
+  if (eventUtcMs > nowMs + maxFutureMs) {
     throw new Error('too_far_in_future');
   }
 
   const reminderId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
-  const timeouts = [];
-  const hasStartReminder = delayStartMs > 0;
-
-  if (delayBeforeMs >= 0) {
-    const tBefore = setTimeout(async () => {
-      try {
-        if (!channel?.isTextBased()) return;
-        await channel.send({
-          content:
-            `@everyone\n` +
-            `【Event Reminder】\n` +
-            `Title: ${title}\n` +
-            `Server time ${serverStr} (JST ${jstStr}) — 5 minutes left.`
-        });
-      } catch (e) {
-        console.error('Failed to send event reminder (5min):', e);
-      } finally {
-        if (!hasStartReminder) {
-          eventReminders.delete(reminderId);
-        }
-      }
-    }, delayBeforeMs);
-    timeouts.push(tBefore);
-  }
-
-  if (delayStartMs > 0) {
-    const tStart = setTimeout(async () => {
-      try {
-        if (!channel?.isTextBased()) return;
-        await channel.send({
-          content:
-            `@everyone\n` +
-            `【Event Reminder】\n` +
-            `Title: ${title}\n` +
-            `Server time ${serverStr} (JST ${jstStr}) — starts now.`
-        });
-      } catch (e) {
-        console.error('Failed to send event reminder (start):', e);
-      } finally {
-        eventReminders.delete(reminderId);
-      }
-    }, delayStartMs);
-    timeouts.push(tStart);
-  }
-
   eventReminders.set(reminderId, {
-    timeouts,
     channelId: channel?.id,
     guildId,
     title,
     serverStr,
     jstStr,
     eventUtcMs,
-    createdBy: requestedBy
+    createdBy: requestedBy,
+    sent5min: false,
+    sentStart: false
   });
-
+  saveEventReminders();
   return reminderId;
 }
 
@@ -152,6 +154,51 @@ client.once('ready', async () => {
   loginTimeoutId = null;
   console.log(`Logged in as ${client.user.tag}`);
   console.log('対応リアクション:', Object.keys(FLAG_TO_LANG).join(' '));
+
+  await loadEventReminders();
+  const POLL_INTERVAL_MS = 60 * 1000;
+  setInterval(async () => {
+    const nowMs = Date.now();
+    const remind5minMs = 5 * 60 * 1000;
+    let changed = false;
+    for (const [id, r] of [...eventReminders.entries()]) {
+      let channel = client.channels.cache.get(r.channelId);
+      if (!channel) channel = await client.channels.fetch(r.channelId).catch(() => null);
+      if (!channel?.isTextBased()) {
+        eventReminders.delete(id);
+        changed = true;
+        continue;
+      }
+      const content5 = `@everyone\n【Event Reminder】\nTitle: ${r.title}\nServer time ${r.serverStr} (JST ${r.jstStr}) — 5 minutes left.`;
+      const contentStart = `@everyone\n【Event Reminder】\nTitle: ${r.title}\nServer time ${r.serverStr} (JST ${r.jstStr}) — starts now.`;
+      if (nowMs >= r.eventUtcMs - remind5minMs && !r.sent5min) {
+        try {
+          await channel.send({ content: content5 });
+        } catch (e) {
+          console.error('Failed to send event reminder (5min):', e);
+        }
+        r.sent5min = true;
+        changed = true;
+      }
+      if (nowMs >= r.eventUtcMs && !r.sentStart) {
+        try {
+          await channel.send({ content: contentStart });
+        } catch (e) {
+          console.error('Failed to send event reminder (start):', e);
+        }
+        r.sentStart = true;
+        changed = true;
+      }
+      if (r.sent5min && r.sentStart) {
+        eventReminders.delete(id);
+        changed = true;
+      } else if (nowMs > r.eventUtcMs + 60 * 1000) {
+        eventReminders.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) saveEventReminders();
+  }, POLL_INTERVAL_MS);
 
   // スラッシュコマンド登録（失敗しても Bot はオンラインのままにする）
   const helpCommand = new SlashCommandBuilder()
@@ -383,10 +430,8 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      if (entry.timeouts?.length) {
-        for (const t of entry.timeouts) clearTimeout(t);
-      }
       eventReminders.delete(id);
+      saveEventReminders();
 
       await interaction.reply({
         content:
