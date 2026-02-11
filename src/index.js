@@ -668,16 +668,27 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const imageAttachment = message.attachments?.find(isImage);
     const imageUrl = imageAttachment?.url ?? imageAttachment?.proxyURL;
 
+    const isFromBot = !!message.author?.bot;
+    const isOurBot = message.author?.id === client.user?.id;
+    console.log('[Reaction] メッセージ取得:', { hasText: !!text, textLen: (text || '').length, hasImage: !!imageUrl, isFromBot, isOurBot });
+
     if (!text && !imageUrl) {
+      console.log('[Reaction] スキップ: テキスト・画像なし');
       await message.reply({ content: '翻訳できるテキストがありません。', ephemeral: false });
       return;
     }
 
     // Bot の投稿は help メッセージだけ翻訳する（他 Bot は翻訳しない）。画像はユーザー投稿のみ対象。
     if (message.author?.bot) {
-      if (message.author.id !== client.user.id) return;
+      if (message.author.id !== client.user.id) {
+        console.log('[Reaction] スキップ: 他Botのメッセージのため');
+        return;
+      }
       const isHelp = text && (isHelpMessage(text) || helpMessageCache.has(message.id));
-      if (!isHelp) return; // 自 Bot の help 以外は無視（Bot の画像は翻訳しない）
+      if (!isHelp) {
+        console.log('[Reaction] スキップ: 自Botのメッセージだが help 以外');
+        return;
+      }
     }
 
     console.log('[Reaction] 翻訳開始:', targetLang, imageUrl ? '(画像)' : '');
@@ -704,7 +715,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
     await message.channel.send({ content: body });
     console.log('[Reaction] 翻訳完了');
   } catch (err) {
-    console.error('[Reaction] Error:', err);
+    console.error('[Reaction] Error:', err?.message ?? err);
+    if (err && typeof err === 'object' && err.stack) console.error('[Reaction] Stack:', err.stack);
     const replyContent = err.message?.includes('API')
       ? '翻訳APIのエラーです。APIキーと残高を確認してください。'
       : `翻訳に失敗しました: ${err.message}`;
