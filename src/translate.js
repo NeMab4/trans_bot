@@ -48,8 +48,7 @@ export async function translate(text, targetLang) {
         content: text
       }
     ],
-    max_completion_tokens: 1000,
-    temperature: 0.3
+    max_completion_tokens: 1000
   });
 
   const result = response.choices[0]?.message?.content?.trim();
@@ -102,8 +101,6 @@ async function extractTextFromImageOnce(imageUrl, model, prompt) {
         ]
       }
     ],
-    // OCRは創造性不要
-    temperature: 0,
     max_completion_tokens: 1200
   });
 
