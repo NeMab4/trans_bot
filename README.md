@@ -151,6 +151,59 @@ Render のインスタンス IP が Discord にレート制限され、ゲート
 
 Railway 無料枠は月の利用量に上限がありますが、スリープは Render ほど厳しくないため、GAS の wake ping は必須ではありません。必要なら **Settings → Networking** で Public URL を有効にし、その URL を GAS で叩くこともできます。
 
+## Fly.io にデプロイ
+
+Render で Discord ゲートウェイがタイムアウトする場合や、常時稼働させたい場合に **Fly.io** で動かせます。Docker ビルドでデプロイします。
+
+### 前提
+
+- [Fly.io](https://fly.io) アカウントと [flyctl](https://fly.io/docs/hands-on/install-flyctl/) のインストール
+- このリポジトリを clone 済み
+
+### 手順
+
+1. **ログイン**
+   ```bash
+   fly auth login
+   ```
+
+2. **アプリ作成（既存の fly.toml を使う場合）**
+   ```bash
+   fly launch --no-deploy
+   ```
+   - アプリ名を聞かれたらそのまま Enter（`trans-bot`）か、任意の名前に変更
+   - Region は希望のリージョン（例: `nrt` 東京）を選択
+
+3. **シークレット（環境変数）を設定**
+   ```bash
+   fly secrets set DISCORD_TOKEN=あなたのBotトークン
+   fly secrets set OPENAI_API_KEY=sk-...
+   fly secrets set NOTION_API_KEY=ntn_...
+   fly secrets set NOTION_EVENT_DB_ID=...
+   fly secrets set NOTION_USER_LANG_DB_ID=...
+   ```
+   またはまとめて:
+   ```bash
+   fly secrets set DISCORD_TOKEN=xxx OPENAI_API_KEY=xxx NOTION_API_KEY=xxx NOTION_EVENT_DB_ID=xxx NOTION_USER_LANG_DB_ID=xxx
+   ```
+
+4. **デプロイ**
+   ```bash
+   fly deploy
+   ```
+
+5. **ログで起動確認**
+   ```bash
+   fly logs
+   ```
+   `Logged in as ...` と `Slash commands registered.` が出ていれば OK。
+
+### 補足
+
+- **Dockerfile** で Node 22 を使い、`npm start` で起動します。
+- **fly.toml** で `internal_port = 8080`、`min_machines_running = 1` にしています（1台常時稼働）。
+- ヘルスチェック用にルートへ HTTP アクセスすると `ok` を返します。必要なら GAS の wake ping の URL を Fly の URL（`https://<app>.fly.dev`）に変更してスリープ対策も可能です。
+
 ## 注意
 
 - OpenAI API の利用料が発生します（gpt-5.1-chat-latest を使用。2026年2月の gpt-4o 系終了に伴い移行済み）
