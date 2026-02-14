@@ -769,14 +769,14 @@ function startBot() {
 
 startBot();
 
-// Render 用: PORT が設定されていれば HTTP サーバーを立てる（GAS の定期 ping でスリープ解除）
+// Render / Fly.io 用: PORT が設定されていれば HTTP サーバーを立てる（ヘルスチェック・GAS の定期 ping 用）
 const port = process.env.PORT;
 if (port) {
   const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
   });
-  server.listen(Number(port), () => {
+  server.listen(Number(port), '0.0.0.0', () => {
     console.log(`Wake endpoint: http://0.0.0.0:${port}`);
   });
 }

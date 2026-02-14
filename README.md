@@ -153,7 +153,7 @@ Railway 無料枠は月の利用量に上限がありますが、スリープは
 
 ## 注意
 
-- OpenAI API の利用料が発生します（gpt-4o-mini を使用）
+- OpenAI API の利用料が発生します（gpt-5.1-chat-latest を使用。2026年2月の gpt-4o 系終了に伴い移行済み）
 - `.env` は Git にコミットしないでください（`.gitignore` 済み）
 
 ## Git（NeMab4 で push する場合）

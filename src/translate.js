@@ -37,7 +37,7 @@ const LANG_NAMES = {
 export async function translate(text, targetLang) {
   const langName = LANG_NAMES[targetLang] ?? targetLang;
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+    model: 'gpt-5.1-chat-latest',
     messages: [
       {
         role: 'system',
@@ -115,14 +115,14 @@ async function extractTextFromImageBestEffort(imageUrl) {
   const p1 =
     '画像内の文字をそのまま抽出してください。改行や空白の意味がある場合はできるだけ維持。' +
     '見出し・本文・UIラベル・チャット文・小さい文字も含めて、読める範囲で全部。';
-  const first = await extractTextFromImageOnce(imageUrl, 'gpt-4o-mini', p1);
+  const first = await extractTextFromImageOnce(imageUrl, 'gpt-5.1-chat-latest', p1);
   if (first) return first;
 
-  // 2回目: より強いモデルで「小さい文字/薄い文字/斜め」まで粘る
+  // 2回目: 同じモデルで「小さい文字/薄い文字/斜め」まで粘る（gpt-4o 終了に伴い gpt-5.1-chat-latest に統一）
   const p2 =
     '画像内の文字を可能な限り抽出してください。小さい文字、薄い文字、斜めの文字、背景に埋もれた文字も拡大して読むつもりで抽出。' +
     '一部しか読めなくても、読めた文字は必ず出力してください。';
-  const second = await extractTextFromImageOnce(imageUrl, 'gpt-4o', p2);
+  const second = await extractTextFromImageOnce(imageUrl, 'gpt-5.1-chat-latest', p2);
   return second;
 }
 
